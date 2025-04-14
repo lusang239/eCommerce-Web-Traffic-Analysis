@@ -1,0 +1,4 @@
+.venv
+gcp.json
+.DS_Store
+report.key
