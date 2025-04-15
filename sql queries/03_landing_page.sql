@@ -55,6 +55,34 @@ the website manager ran a new custom landing page (/lander-1) in a 50/50 A/B tes
 against the homepage(/home) for the gsearch nonbrand traffic from Jun 19 — July 28.
 */
 
+-- Compare the bounce rate between two groups
+with session_landing_homepage_lander1 as (
+  select 
+    website_session_id,
+    pageview_url as landing_page_url
+  from `raw_data.website_pageviews`
+  where website_pageview_id in (select min(website_pageview_id) from `raw_data.website_pageviews` group by website_session_id)
+    and created_at between '2012-06-19' and '2012-07-28'
+    and website_session_id in (select distinct website_session_id from `raw_data.website_sessions` where utm_source = 'gsearch' and utm_campaign = 'nonbrand')
+), bounced_sessions as (
+  select website_session_id as bounced_session_id
+  from `raw_data.website_pageviews`
+  where created_at between '2012-06-19' and '2012-07-28'
+  group by 1
+  having count(website_pageview_id) = 1
+)
+select
+  slh.landing_page_url,
+  count(distinct wpv.website_session_id) as sessions,
+  count(distinct bs.bounced_session_id) as bounced_sessions,
+  round(count(distinct bs.bounced_session_id)/count(distinct wpv.website_session_id), 4) as bounce_rate
+from `raw_data.website_pageviews` wpv
+join session_landing_homepage_lander1 slh
+on wpv.website_session_id = slh.website_session_id
+left join bounced_sessions bs
+on wpv.website_session_id = bs.bounced_session_id
+group by 1;
+
 -- check volume routed to two groups
 with session_landing_homepage_lander1 as (
   select
@@ -85,35 +113,6 @@ left join session_pageviews sp
 on wpv.website_session_id = sp.website_session_id
 group by extract(week from slh.session_created_at)
 order by 1;
-
--- Compare the bounce rate between two groups
-with session_landing_homepage_lander1 as (
-  select 
-    website_session_id,
-    pageview_url as landing_page_url
-  from `raw_data.website_pageviews`
-  where website_pageview_id in (select min(website_pageview_id) from `raw_data.website_pageviews` group by website_session_id)
-    and created_at between '2012-06-19' and '2012-07-28'
-    and website_session_id in (select distinct website_session_id from `raw_data.website_sessions` where utm_source = 'gsearch' and utm_campaign = 'nonbrand')
-), bounced_sessions as (
-  select website_session_id as bounced_session_id
-  from `raw_data.website_pageviews`
-  where created_at between '2012-06-19' and '2012-07-28'
-  group by 1
-  having count(website_pageview_id) = 1
-)
-select
-  slh.landing_page_url,
-  count(distinct wpv.website_session_id) as sessions,
-  count(distinct bs.bounced_session_id) as bounced_sessions,
-  round(count(distinct bs.bounced_session_id)/count(distinct wpv.website_session_id), 4) as bounce_rate
-from `raw_data.website_pageviews` wpv
-join session_landing_homepage_lander1 slh
-on wpv.website_session_id = slh.website_session_id
-left join bounced_sessions bs
-on wpv.website_session_id = bs.bounced_session_id
-group by 1;
-
 
 -- Compare the conversion rate
 with session_landing_homepage_lander1 as (
@@ -195,13 +194,13 @@ select
       else null
   end as from_landing_page,
   count(distinct website_session_id) as sessions,
-  count(distinct case when view_products = 1 then website_session_id else null end) as to_product,
-  count(distinct case when see_mrfuzzy = 1 then website_session_id else null end) as to_mrfuzzy,
-  count(distinct case when go_to_cart = 1 then website_session_id else null end) as to_cart,
-  count(distinct case when fill_in_shipping = 1 then website_session_id else null end) as to_shipping,
-  count(distinct case when add_billing = 1 then website_session_id else null end) as to_billing,
-  count(distinct case when complete_checkout = 1 then website_session_id else null end) as to_thankyou,
-  round(count(distinct case when complete_checkout = 1 then website_session_id else null end)/count(distinct case when view_products = 1 then website_session_id else null end), 4) as product_to_thank_you_CVR
+  count(view_products) as to_product,
+  count(see_mrfuzzy) as to_mrfuzzy,
+  count(go_to_cart) as to_cart,
+  count(fill_in_shipping) as to_shipping,
+  count(add_billing) as to_billing,
+  count(complete_checkout) as to_thankyou,
+  round(count(complete_checkout)/count(view_products), 4) as product_to_thank_you_CVR
 from `raw_data.session_level_funnel_table`
 group by 1;
 
@@ -211,12 +210,12 @@ select
       when custom_lender = 1 then 'custom_lender'
       else null
   end as from_landing_page,
-  round(count(distinct case when view_products = 1 then website_session_id else null end)/count(distinct website_session_id), 4) as lander_click_rate,
-  round(count(distinct case when see_mrfuzzy = 1 then website_session_id else null end)/count(distinct case when view_products = 1 then website_session_id else null end), 4) as products_click_rate,
-  round(count(distinct case when go_to_cart = 1 then website_session_id else null end)/count(distinct case when see_mrfuzzy = 1 then website_session_id else null end), 4) as mrfuzzy_click_rate,
-  round(count(distinct case when fill_in_shipping = 1 then website_session_id else null end)/count(distinct case when go_to_cart = 1 then website_session_id else null end), 4) as cart_click_rate,
-  round(count(distinct case when add_billing = 1 then website_session_id else null end)/count(distinct case when  fill_in_shipping = 1 then website_session_id else null end), 4) as shipping_click_rate,
-  round(count(distinct case when complete_checkout = 1 then website_session_id else null end)/count(distinct case when add_billing = 1 then website_session_id else null end), 4) as billing_click_rate
+  round(count(view_products)/count(distinct website_session_id), 4) as lander_to_product,
+  round(count(see_mrfuzzy)/count(view_products), 4) as product_to_mrfuzzy,
+  round(count(go_to_cart)/count(see_mrfuzzy), 4) as mrfuzzy_to_cart,
+  round(count(fill_in_shipping)/count(go_to_cart), 4) as cart_to_shipping,
+  round(count(add_billing)/count(fill_in_shipping), 4) as shipping_to_billing,
+  round(count(complete_checkout)/count(add_billing), 4) as billing_to_checkout
 from `raw_data.session_level_funnel_table`
 group by 1;
 
@@ -226,32 +225,98 @@ group by 1;
 ------------------------------------------------
 /*
 the website manager ran a new custom billing page (/billing-2) in a 50/50 A/B test 
-against the original billing page(/billing) from Sep 10 - Nov 10.
+against the original billing page(/billing) for the gsearch nonbrand traffic from Sep 10 - Nov 10.
 */
+
+-- Compare the conversion rate between /billing and /billing-2
+create or replace view `raw_data.sessions_w_billing_pageview` as
+select
+  website_session_id,
+  max(billing_page) as billing_page,
+  max(new_billing_page) as new_billing_page,
+  max(thankyou_page) as thankyou_page
+from (
+  select
+    website_session_id,
+    case when pageview_url = '/billing' then 1 else null end as billing_page,
+    case when pageview_url = '/billing-2' then 1 else null end as new_billing_page,
+    case when pageview_url = '/thank-you-for-your-order' then 1 else null end as thankyou_page
+  from `raw_data.website_pageviews`
+  where created_at between '2012-09-10' and '2013-01-05'
+) tbl
+group by 1
+having billing_page is not null or new_billing_page is not null;
+
+select * from `raw_data.sessions_w_billing_pageview`;
+
+select
+  case when billing_page = 1 then '/billing' 
+       when new_billing_page = 1 then '/billing-2'
+      else null
+  end as from_billing_page,
+  count(distinct website_session_id) as billing_sessions,
+  count(thankyou_page) as billing_to_thankyou,
+  round(count(thankyou_page)/count(distinct website_session_id), 4) as billing_to_thankyou_CVR
+from`raw_data.sessions_w_billing_pageview`
+group by 1;
+
+
+-- get an estimated converted sales for the next 4 months (2013/01/06 ~ 2013/05/06)
+select count(website_session_id) as billing_session_past_month
+from `raw_data.website_pageviews`
+where created_at between '2013-01-06' and '2013-05-06'
+  and pageview_url in ('/billing', '/billing-2');
+
+-- check volume routed to two groups
+with session_created_date as(
+  select 
+    created_at,
+    website_session_id
+  from `raw_data.website_pageviews`
+  where website_pageview_id in (select min(website_pageview_id) from `raw_data.website_pageviews` group by website_session_id)
+    and created_at between '2012-08-01' and '2013-03-31'
+), billing_w_create_date as (
+  select
+    ssd.created_at,
+    sbp.*
+  from `raw_data.sessions_w_billing_pageview` sbp
+  left join session_created_date ssd
+    on sbp.website_session_id = ssd.website_session_id
+)
+select
+  min(date(created_at)) as week_start_at,
+  round(count(thankyou_page)/count(distinct website_session_id), 4) as to_thankyou_CVR,
+  count(billing_page) as billing_sessions,
+  count(new_billing_page) as new_billing_sessions
+from billing_w_create_date
+group by extract(week from created_at)
+order by 1;
 
 -- revenue per billing session
 select
   pageview_url,
   count(distinct website_session_id) as sessions,
-  round(sum(price_usd)/count(distinct website_session_id), 4) as revenue_per_session
+  round(sum(price_usd)/count(distinct website_session_id), 4) as revenue_per_session,
+  round(sum(price_usd - cogs_usd)/count(distinct website_session_id), 4) as margin_per_session,
 from (
   select
     wpv.pageview_url,
     wpv.website_session_id,
     o.order_id,
-    o.price_usd
+    o.price_usd,
+    o.cogs_usd
   from `raw_data.website_pageviews` wpv
   left join `raw_data.orders` o
     on wpv.website_session_id = o.website_session_id
-  where wpv.created_at between '2012-09-10' and '2012-11-10'
+  where wpv.created_at between '2012-09-10' and '2013-01-05'
     and wpv.pageview_url in ('/billing', '/billing-2')
 ) billing_pageview_and_orders_data
 group by 1;
 
--- get an estimated revenue earn for the past month
+-- get an estimated revenue earn for the next 4 months (2013/01/06 ~ 2013/02/06)
 select count(website_session_id) as billing_session_past_month
 from `raw_data.website_pageviews`
-where created_at between '2012-10-27' and '2012-11-27'
+where created_at between '2013-01-06' and '2013-02-06'
   and pageview_url in ('/billing', '/billing-2');
 
 
